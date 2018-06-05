@@ -1,9 +1,6 @@
 var BaseArrayClass = require('./BaseArrayClass');
 var utils = require("cordova/utils");
 
-var resolvedPromise = typeof Promise == 'undefined' ? null : Promise.resolve();
-var nextTick = resolvedPromise ? function(fn) { resolvedPromise.then(fn); } : function(fn) { setTimeout(fn); };
-
 //---------------------------
 // Convert HTML color to RGB
 //---------------------------
@@ -24,6 +21,21 @@ function isHTMLColorString(inputValue) {
     return inputValue in HTML_COLORS;
 }
 
+function deleteFromObject(object, type) {
+    if (object === null) return object;
+    if (typeof object !== "object") {
+      return object;
+    }
+    for(var index in Object.keys(object)) {
+        var key = Object.keys(object)[index];
+        if (typeof object[key] === 'object') {
+           object[key] = deleteFromObject(object[key], type);
+        } else if (typeof object[key] === type) {
+           delete object[key];
+        }
+    }
+    return object;
+}
 function HTMLColor2RGBA(colorValue, defaultOpacity) {
     defaultOpacity = !defaultOpacity ? 1.0 : defaultOpacity;
     if (colorValue instanceof Array) {
@@ -183,10 +195,9 @@ function parseBoolean(boolValue) {
 }
 
 function isDom(element) {
-    return element &&
-        element.nodeType === Node.ELEMENT_NODE &&
-        element instanceof SVGElement === false &&
-        typeof element.getBoundingClientRect === "function";
+    return !!element &&
+        typeof element === "object" &&
+        "getBoundingClientRect" in element;
 }
 
 function getDivRect(div) {
@@ -200,24 +211,14 @@ function getDivRect(div) {
       rect.top = Math.max(rect.top, window.pageOffsetY);
       rect.width = Math.max(rect.width, window.innerWidth);
       rect.height = Math.max(rect.height, window.innerHeight);
-      rect.right = rect.left + rect.width;
-      rect.bottom = rect.top + rect.height;
     } else {
       rect = div.getBoundingClientRect();
-      if ("right" in rect === false) {
-        rect.right = rect.left + rect.width;
-      }
-      if ("bottom" in rect === false) {
-        rect.bottom = rect.top + rect.height;
-      }
     }
     return {
       left: rect.left,
       top: rect.top,
       width: rect.width,
-      height: rect.height,
-      right: rect.right,
-      bottom: rect.bottom
+      height: rect.height
     };
 }
 
@@ -225,9 +226,12 @@ var ignoreTags = [
   "pre", "textarea", "p", "form", "input", "caption", "canvas", "svg"
 ];
 
+// .pgm-ignore class allows you to indicate that the DOM element is not touchable.
+// This is useful when you have lots of items, such as list item.
+var ignoreClasses = ["nav-decor", "pgm-ignore"];
 
 function shouldWatchByNative(node) {
-  if (!node || node.nodeType !== Node.ELEMENT_NODE || !node.parentNode || node instanceof SVGElement) {
+  if (node.nodeType !== Node.ELEMENT_NODE || !node.parentNode) {
     if (node === document.body) {
       return true;
     }
@@ -235,94 +239,86 @@ function shouldWatchByNative(node) {
   }
 
   var tagName = node.tagName.toLowerCase();
-  if (ignoreTags.indexOf(tagName) > -1) {
-    return false;
-  }
+  if (ignoreTags.indexOf(tagName) == -1) {
 
-  var classNames = (node.className || "").split(" ");
-  if (classNames.indexOf("_gmaps_cdv_") > -1) {
-    return true;
+    var classNames = (node.className || "").split(" ");
+    var matches = classNames.filter(function(clsName) {
+      return ignoreClasses.indexOf(clsName) !== -1;
+    });
+    if (matches && matches.length > 0) {
+      return false;
+    }
+  } else {
+    return false;
   }
 
   var visibilityCSS = getStyle(node, 'visibility');
   var displayCSS = getStyle(node, 'display');
-
-  // Do not check this at here.
-  //var pointerEventsCSS = getStyle(node, 'pointer-events');
-
-  //-----------------------------------------
-  // no longer check the opacity property,
-  // because the app might start changing the opacity later.
-  //-----------------------------------------
-  //var opacityCSS = getStyle(node, 'opacity');
-  //opacityCSS = /^[\d.]+$/.test(opacityCSS + "") ? opacityCSS : 1;
-
-  //-----------------------------------------
-  // no longer check the clickable size,
-  // because HTML still can display larger element inside one small element.
-  //-----------------------------------------
-  // var clickableSize = (
-  //   node.offsetHeight > 0 && node.offsetWidth > 0 ||
-  //   node.clientHeight > 0 && node.clientWidth > 0);
+  var pointerEventsCSS = getStyle(node, 'pointer-events');
+  var opacityCSS = getStyle(node, 'opacity');
+  opacityCSS = /^[\d.]+$/.test(opacityCSS + "") ? opacityCSS : 1;
+  var clickableSize = (
+    node.offsetHeight > 0 && node.offsetWidth > 0 ||
+    node.clientHeight > 0 && node.clientWidth > 0 ||
+    node.clientHeight === 0 && node.clientWidth === 0 &&
+        node.className.indexOf("_gmaps_cdv_") > -1);
   return displayCSS !== "none" &&
-    visibilityCSS !== "hidden";
+    opacityCSS > 0 && visibilityCSS !== "hidden" &&
+    clickableSize && pointerEventsCSS !== "none";
 }
 
 
 // Get z-index order
 // http://stackoverflow.com/a/24136505
 var internalCache = {};
-function _clearInternalCache() {
-  internalCache = undefined;
-  internalCache = {};
-}
-function _removeCacheById(elemId) {
-  delete internalCache[elemId];
-}
 function getZIndex(dom) {
     if (dom === document.body) {
       internalCache = undefined;
       internalCache = {};
     }
+    var z = null;
     if (!dom) {
       return 0;
     }
 
-    var z = 0;
     if (window.getComputedStyle) {
-      z = document.defaultView.getComputedStyle(dom, null).getPropertyValue('z-index');
+      try {
+        z = parseInt(document.defaultView.getComputedStyle(dom, null).getPropertyValue('z-index'), 10);
+      } catch(e) {}
     }
     if (dom.currentStyle) {
-        z = dom.currentStyle['z-index'];
+        z = parseInt(dom.currentStyle['z-index']);
     }
-    var elemId = dom.getAttribute("__pluginDomId");
+    if (dom === document.body && z === "auto") {
+      z = 0;
+    }
+    if (isNaN(z)) {
+        z = 0;
+    }
     var parentNode = dom.parentNode;
-    var parentZIndex = 0;
     if (parentNode && parentNode.nodeType === Node.ELEMENT_NODE) {
       var parentElemId = parentNode.getAttribute("__pluginDomId");
       if (parentElemId in internalCache) {
-        parentZIndex = internalCache[parentElemId];
+        z += internalCache[parentElemId];
       } else {
-        parentZIndex = getZIndex(dom.parentNode);
+        var parentZIndex = getZIndex(dom.parentNode);
         internalCache[parentElemId] = parentZIndex;
+        z += parentZIndex;
       }
     }
+    var elemId = dom.getAttribute("__pluginDomId");
+    internalCache[elemId] = z;
 
-    var isInherit = false;
-    if (z === "unset" || z === "initial") {
-      z = 0;
-    } else if (z === "auto" || z === "inherit") {
-      z = 0;
-      isInherit = true;
-    } else {
-      z = parseInt(z);
+    return z;
+}
+function getDomDepth(dom, idx, parentDepth, floorLevel) {
+    if (dom.nodeType !== Node.ELEMENT_NODE) {
+      return 0;
     }
-    //dom.setAttribute("__ZIndex", z);
-    internalCache[elemId] = z + parentZIndex;
-    return {
-      isInherit: isInherit,
-      z: z
-    };
+    // In order to handle this value as double anytime, add 0.01 (for Android)
+    var result = parentDepth +  (getZIndex(dom) + 1 + idx) / (1 << floorLevel) + 0.01;
+    //dom.setAttribute("_depth", result); // for debugging
+    return result;
 }
 
 // Get CSS value of an element
@@ -586,7 +582,7 @@ function markerOptionsFilter(markerOptions) {
   markerOptions.visible = defaultTrueOption(markerOptions.visible);
   markerOptions.flat = markerOptions.flat === true;
   markerOptions.rotation = markerOptions.rotation || 0;
-  markerOptions.opacity = markerOptions.opacity === 0 ? 0 : (parseFloat("" + markerOptions.opacity, 10) || 1);
+  markerOptions.opacity = parseFloat("" + markerOptions.opacity, 10) || 1;
   markerOptions.disableAutoPan = markerOptions.disableAutoPan === true;
   markerOptions.noCache = markerOptions.noCache === true; //experimental
   if (typeof markerOptions.icon === "object") {
@@ -605,10 +601,6 @@ function markerOptionsFilter(markerOptions) {
     markerOptions.infoWindowAnchor = [markerOptions.infoWindowAnchor.x, markerOptions.infoWindowAnchor.anchor.y];
   }
 
-  if ("style" in markerOptions && !("styles" in markerOptions)) {
-    markerOptions.styles = markerOptions.style;
-    delete markerOptions.style;
-  }
   if ("styles" in markerOptions) {
       markerOptions.styles = typeof markerOptions.styles === "object" ? markerOptions.styles : {};
 
@@ -626,100 +618,10 @@ function markerOptionsFilter(markerOptions) {
   return markerOptions;
 }
 
-function quickfilter(domPositions, mapElemIDs) {
-  //console.log("before", JSON.parse(JSON.stringify(domPositions)));
-  var keys = Object.keys(domPositions);
-
-  var tree = {};
-  mapElemIDs.forEach(function(mapElemId) {
-    var size = domPositions[mapElemId].size;
-    var mapRect = {
-      left: size.left,
-      top: size.top,
-      right: size.left + size.width,
-      bottom: size.top + size.height
-    };
-
-    tree[mapElemId] = domPositions[mapElemId];
-
-    keys.forEach(function(elemId) {
-      if (domPositions[elemId].ignore) {
-        return;
-      }
-      var domSize = {
-        left: domPositions[elemId].size.left,
-        top: domPositions[elemId].size.top,
-        right: domPositions[elemId].size.left + domPositions[elemId].size.width,
-        bottom: domPositions[elemId].size.bottom + domPositions[elemId].size.height
-      };
-      if (
-          (domSize.left >= mapRect.left && domSize.left <= mapRect.right) ||
-          (domSize.right >= mapRect.left && domSize.right <= mapRect.right) ||
-          (domSize.top >= mapRect.top && domSize.top <= mapRect.bottom) ||
-          (domSize.bottom >= mapRect.top && domSize.bottom <= mapRect.bottom)
-        ) {
-        tree[elemId] = domPositions[elemId];
-      }
-    });
-  });
-
-  //console.log("after", JSON.parse(JSON.stringify(tree)));
-  return tree;
-}
-
-function getPluginDomId(element) {
-  // Generates a __pluginDomId
-  if (!element || !shouldWatchByNative(element)) {
-    return;
-  }
-  var elemId = element.getAttribute("__pluginDomId");
-  if (!elemId) {
-    if (element === document.body) {
-      elemId = "root";
-    } else {
-      elemId = "pgm" + Math.floor(Math.random() * Date.now());
-    }
-    element.setAttribute("__pluginDomId", elemId);
-  }
-  return elemId;
-}
-
-// Add hashCode() method
-// https://stackoverflow.com/a/7616484/697856
-function hashCode(text) {
-  var hash = 0, i, chr;
-  if (text.length === 0) return hash;
-  for (i = 0; i < text.length; i++) {
-    chr   = text.charCodeAt(i);
-    hash  = ((hash << 5) - hash) + chr;
-    hash |= 0; // Convert to 32bit integer
-  }
-  return hash;
-}
-
-function createEvent(eventName, properties) {
-  var evt;
-  if (typeof CustomEvent === 'function') {
-    evt = new CustomEvent(eventName, {
-      bubbles: true,
-      detail: properties || null
-    });
-  } else {
-    evt = document.createEvent('Event');
-    evt.initEvent(eventName, true, false);
-    Object.keys(properties).forEach(function(key) {
-      if (!(key in properties)) {
-        evt[key] = properties[key];
-      }
-    });
-  }
-  return evt;
-}
-
 module.exports = {
-    _clearInternalCache: _clearInternalCache,
-    _removeCacheById: _removeCacheById,
     getZIndex: getZIndex,
+    getDomDepth: getDomDepth,
+    deleteFromObject: deleteFromObject,
     getDivRect: getDivRect,
     getDomInfo: getDomInfo,
     isDom: isDom,
@@ -733,14 +635,5 @@ module.exports = {
     convertToPositionArray: convertToPositionArray,
     getLatLng: getLatLng,
     shouldWatchByNative: shouldWatchByNative,
-    markerOptionsFilter: markerOptionsFilter,
-    quickfilter: quickfilter,
-    nextTick: nextTick,
-    getPluginDomId: getPluginDomId,
-    hashCode: hashCode,
-    createEvent: createEvent
+    markerOptionsFilter: markerOptionsFilter
 };
-
-if (cordova && cordova.platformId === "browser") {
-  require('cordova/exec/proxy').add('common', module.exports);
-}

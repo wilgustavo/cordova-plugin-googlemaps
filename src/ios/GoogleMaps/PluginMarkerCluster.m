@@ -23,7 +23,6 @@ const int GEOCELL_GRID_SIZE = 4;
 
   // Initialize this plugin
   self.waitCntManager = [NSMutableDictionary dictionary];
-  self.allResults = [NSMutableDictionary dictionary];
   self.pluginMarkers = [NSMutableDictionary dictionary];
   self.debugFlags = [NSMutableDictionary dictionary];
   self.deleteMarkers = [NSMutableArray array];
@@ -166,7 +165,6 @@ const int GEOCELL_GRID_SIZE = 4;
   __block NSString *clusterId = [command.arguments objectAtIndex: 0];
 
   [self.mapCtrl.executeQueue addOperationWithBlock:^{
-    [self.allResults removeAllObjects];
     BOOL isDebug = [[self.debugFlags objectForKey:clusterId] boolValue];
 
     __block NSDictionary *params = [command.arguments objectAtIndex:1];
@@ -189,7 +187,7 @@ const int GEOCELL_GRID_SIZE = 4;
     NSMutableDictionary *properties;
     for (int i = 0; i < new_or_updateCnt; i++) {
       clusterData = [new_or_update objectAtIndex:i];
-      markerId = [clusterData objectForKey:@"__pgmId"];
+      markerId = [clusterData objectForKey:@"id"];
       clusterId_markerId = [NSString stringWithFormat:@"%@-%@", clusterId, markerId];
 
       // Save the marker properties
@@ -293,11 +291,11 @@ const int GEOCELL_GRID_SIZE = 4;
       for (int i = 0; i < [updateClusterIDs count]; i++) {
         clusterId_markerId = [updateClusterIDs objectAtIndex:i];
         @synchronized(self.pluginMarkers) {
-          [self.pluginMarkers setObject:@"WORKING" forKey:clusterId_markerId];
+            [self.pluginMarkers setObject:@"WORKING" forKey:clusterId_markerId];
         }
 
         // Get the marker properties
-        markerProperties = [self.mapCtrl.objects objectForKey:[NSString stringWithFormat:@"marker_property_%@", clusterId_markerId]];
+        markerProperties = [changeProperties objectForKey:clusterId_markerId];
 
         isNew = [self.mapCtrl.objects objectForKey:clusterId_markerId] == nil;
         //--------------------------
@@ -305,28 +303,12 @@ const int GEOCELL_GRID_SIZE = 4;
         //--------------------------
         if ([clusterId_markerId containsString:@"-marker_"]) {
           if (isNew) {
-            markerProperties = [self.mapCtrl.objects objectForKey:[NSString stringWithFormat:@"marker_property_%@", clusterId_markerId]];
             [super _create:clusterId_markerId markerOptions:markerProperties callbackBlock:^(BOOL successed, id resultObj) {
 
               @synchronized (self.pluginMarkers) {
                 if (successed) {
                   //((GMSMarker *)resultObj).map = self.mapCtrl.map;
                   [self.pluginMarkers setObject:@"CREATED" forKey:clusterId_markerId];
-
-                  NSArray *tmp = [clusterId_markerId componentsSeparatedByString:@"-"];
-                  NSString *markerId = [tmp objectAtIndex:1];
-                  NSMutableDictionary *createResult = [NSMutableDictionary dictionary];
-                  GMSMarker *marker = resultObj;
-                  NSString *iconCacheKey = [NSString stringWithFormat:@"marker_icon_%@", marker.userData];
-                  UIImage *image = [[UIImageCache sharedInstance] getCachedImageForKey:iconCacheKey];
-                  if (image != nil) {
-                    [createResult setObject:[NSNumber numberWithInt: (int)image.size.width] forKey:@"width"];
-                    [createResult setObject:[NSNumber numberWithInt: (int)image.size.height] forKey:@"height"];
-                  } else {
-                    [createResult setObject:[NSNumber numberWithInt: 24] forKey:@"width"];
-                    [createResult setObject:[NSNumber numberWithInt: 40] forKey:@"height"];
-                  }
-                  [self.allResults setObject:createResult forKey:markerId];
                 } else {
                   //--------------------------------------
                   // Could not read icon for some reason
@@ -363,7 +345,6 @@ const int GEOCELL_GRID_SIZE = 4;
         //--------------------------
         // cluster icon
         //--------------------------
-        markerProperties = [changeProperties objectForKey:clusterId_markerId];
 
 
         if (isNew) {
@@ -441,9 +422,9 @@ const int GEOCELL_GRID_SIZE = 4;
 }
 
 - (void) endRedraw:(CDVInvokedUrlCommand*)command {
-  NSLog(@"--->allResults = %@", self.allResults);
-  CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:self.allResults];
-  [(CDVCommandDelegateImpl *)self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+    [(CDVCommandDelegateImpl *)self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
 - (void) deleteProcess:(NSDictionary *) params  clusterId:(NSString *)clusterId{
@@ -495,10 +476,10 @@ const int GEOCELL_GRID_SIZE = 4;
       GMSMarker *marker = resultObj;
       @synchronized (self_.pluginMarkers) {
         if ([[self_.pluginMarkers objectForKey:markerId] isEqualToString:@"DELETED"]) {
-          [self_ _removeMarker:marker];
-          [self_.pluginMarkers removeObjectForKey:markerId];
-          callbackBlock(YES, nil);
-          return;
+            [self_ _removeMarker:marker];
+            [self_.pluginMarkers removeObjectForKey:markerId];
+            callbackBlock(YES, nil);
+            return;
         }
 
         [self_.pluginMarkers setObject:@"CREATED" forKey:markerId];
@@ -518,7 +499,7 @@ const int GEOCELL_GRID_SIZE = 4;
   }];
 }
 
-- (void) decreaseWaitWithClusterId:(NSString *) clusterId command:(CDVInvokedUrlCommand*)command {
+- (void) decreaseWaitWithClusterId:(NSString *) clusterId command:(CDVInvokedUrlCommand*)command{
 
   @synchronized (_waitCntManager) {
     int waitCnt = [[_waitCntManager objectForKey:clusterId] intValue];
@@ -560,10 +541,10 @@ const int GEOCELL_GRID_SIZE = 4;
 
 - (char) _subdiv_char:(int) posX y:(int)posY {
   return [GEOCELL_ALPHABET characterAtIndex:(
-                                             (posY & 2) << 2 |
-                                             (posX & 2) << 1 |
-                                             (posY & 1) << 1 |
-                                             (posX & 1))];
+          (posY & 2) << 2 |
+          (posX & 2) << 1 |
+          (posY & 1) << 1 |
+          (posX & 1))];
 }
 
 

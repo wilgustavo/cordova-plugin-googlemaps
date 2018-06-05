@@ -1,21 +1,46 @@
 //
-//  PluginMapViewController.m
+//  GoogleMapsViewController.m
 //  cordova-googlemaps-plugin v2
 //
 //  Created by Masashi Katsumata.
 //
 //
 
-#import "PluginMapViewController.h"
+#import "GoogleMapsViewController.h"
+#if CORDOVA_VERSION_MIN_REQUIRED < __CORDOVA_4_0_0
+#import <Cordova/CDVJSON.h>
+#endif
 
-@implementation PluginMapViewController
 
-- (void)mapView:(GMSMapView *)mapView didTapPOIWithPlaceID:(NSString *)placeID name:(NSString *)name location:(CLLocationCoordinate2D)location {
+@implementation GoogleMapsViewController
 
-  NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: '%@', callback: '_onMapEvent', args: ['%@', '%@', new plugin.google.maps.LatLng(%f,%f)]});}",
-                        self.overlayId, self.overlayId, @"poi_click", placeID, name, location.latitude, location.longitude];
-  [self execJS:jsString];
+- (id)initWithOptions:(NSDictionary *) options {
+  self = [super init];
+  self.plugins = [NSMutableDictionary dictionary];
+  self.isFullScreen = NO;
+  self.screenSize = [[UIScreen mainScreen] bounds];
+  self.screenScale = [[UIScreen mainScreen] scale];
+  self.clickable = YES;
+  self.isRenderedAtOnce = NO;
+  self.mapDivId = nil;
+  self.objects = [[NSMutableDictionary alloc] init];
+  self.executeQueue =  [NSOperationQueue new];
+  self.executeQueue.maxConcurrentOperationCount = 10;
+
+
+  return self;
+}
+
+- (void)viewDidLoad
+{
+  [super viewDidLoad];
+
+}
+
+
+- (void)didReceiveMemoryWarning
+{
+  [super didReceiveMemoryWarning];
 }
 
 /**
@@ -28,44 +53,18 @@
 - (BOOL)didTapMyLocationButtonForMapView:(GMSMapView *)mapView {
 
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: '%@', callback: '_onMapEvent', args: []});}",
-                        self.overlayId, self.overlayId, @"my_location_button_click"];
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: '%@', callback: '_onMapEvent', args: []});",
+                        self.mapId, @"my_location_button_click"];
   [self execJS:jsString];
   return NO;
 }
 
 #pragma mark - GMSMapViewDelegate
-- (void)mapView:(GMSMapView *)mapView didTapMyLocation:(CLLocationCoordinate2D)location {
-
-    NSMutableDictionary *latLng = [NSMutableDictionary dictionary];
-    [latLng setObject:[NSNumber numberWithDouble:location.latitude] forKey:@"lat"];
-    [latLng setObject:[NSNumber numberWithDouble:location.longitude] forKey:@"lng"];
-
-    NSMutableDictionary *json = [NSMutableDictionary dictionary];
-
-    [json setObject:latLng forKey:@"latLng"];
-    [json setObject:[NSNumber numberWithFloat:[self.map.myLocation speed]] forKey:@"speed"];
-    [json setObject:[NSNumber numberWithFloat:[self.map.myLocation altitude]] forKey:@"altitude"];
-
-    //todo: calcurate the correct accuracy based on horizontalAccuracy and verticalAccuracy
-    [json setObject:[NSNumber numberWithFloat:[self.map.myLocation horizontalAccuracy]] forKey:@"accuracy"];
-    [json setObject:[NSNumber numberWithDouble:[self.map.myLocation.timestamp timeIntervalSince1970]] forKey:@"time"];
-    [json setObject:[NSNumber numberWithInteger:[self.map.myLocation hash]] forKey:@"hashCode"];
-
-    NSData* jsonData = [NSJSONSerialization dataWithJSONObject:json options:0 error:nil];
-    NSString* sourceArrayString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-
-    NSString* jsString = [NSString
-                          stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: '%@', callback: '_onMapEvent', args: [%@]});}",
-                          self.overlayId, self.overlayId, @"my_location_click", sourceArrayString];
-    [self execJS:jsString];
-}
 
 /**
  * @callback the my location button is clicked.
  */
 - (void)mapView:(GMSMapView *)mapView didTapAtCoordinate:(CLLocationCoordinate2D)coordinate {
-
 
   if (self.activeMarker) {
     /*
@@ -89,7 +88,7 @@
   //NSString *pluginName;
   NSString *key;
   NSDictionary *properties;
-  //CDVPlugin<IPluginProtocol> *plugin;
+  //CDVPlugin<MyPlgunProtocol> *plugin;
   GMSCoordinateBounds *bounds;
   GMSPath *path;
   NSArray *keys;
@@ -382,8 +381,8 @@
   CGPoint point = [self.map.projection
                    pointForCoordinate:CLLocationCoordinate2DMake(position.latitude, position.longitude)];
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: 'syncPosition', callback: '_onSyncInfoWndPosition', args: [{x: %f, y: %f}]});}",
-                        self.overlayId, self.overlayId, point.x, point.y ];
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: 'syncPosition', callback: '_onSyncInfoWndPosition', args: [{x: %f, y: %f}]});",
+                        self.mapId, point.x, point.y ];
   [self execJS:jsString];
 }
 
@@ -412,8 +411,8 @@
           if ([markerTag containsString:@"-marker_"]) {
             [self triggerClusterEvent:@"info_close" marker:self.activeMarker];
           }
-//        } else {
-//          [self triggerMarkerEvent:@"info_close" marker:self.activeMarker];
+        } else {
+          [self triggerMarkerEvent:@"info_close" marker:self.activeMarker];
         }
       }
       [self triggerClusterEvent:@"cluster_click" marker:marker];
@@ -430,8 +429,8 @@
   //NSString *className = [tmp objectAtIndex:0];
 
   // Get the marker plugin
-  //NSString *pluginId = [NSString stringWithFormat:@"%@-%@", self.overlayId, className];
-  //CDVPlugin<IPluginProtocol> *plugin = [self.plugins objectForKey:pluginId];
+  //NSString *pluginId = [NSString stringWithFormat:@"%@-%@", self.mapId, className];
+  //CDVPlugin<MyPlgunProtocol> *plugin = [self.plugins objectForKey:pluginId];
 
   // Get the marker properties
   NSString *markerPropertyId = [NSString stringWithFormat:@"marker_property_%@", clusterId_markerId];
@@ -488,8 +487,7 @@
  * Map tiles are loaded
  */
 - (void) mapViewDidFinishTileRendering:(GMSMapView *)mapView {
-  // no longer available from v2.2.0
-  //[self triggerMapEvent:@"map_loaded"];
+  [self triggerMapEvent:@"map_loaded"];
 }
 
 /**
@@ -499,8 +497,8 @@
 {
 
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: '%@', callback: '_onMapEvent', args: []});}",
-                        self.overlayId, self.overlayId, eventName];
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: '%@', callback: '_onMapEvent', args: []});",
+                        self.mapId, eventName];
   [self execJS:jsString];
 }
 
@@ -511,8 +509,8 @@
 {
 
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: '%@', callback: '_onMapEvent', args: [new plugin.google.maps.LatLng(%f,%f)]});}",
-                        self.overlayId, self.overlayId, eventName, coordinate.latitude, coordinate.longitude];
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: '%@', callback: '_onMapEvent', args: [new plugin.google.maps.LatLng(%f,%f)]});",
+                        self.mapId, eventName, coordinate.latitude, coordinate.longitude];
   [self execJS:jsString];
 }
 
@@ -539,45 +537,52 @@
   NSMutableDictionary *northeast = [NSMutableDictionary dictionary];
   NSMutableDictionary *southwest = [NSMutableDictionary dictionary];
 
-  [northeast setObject:[NSNumber numberWithDouble:bounds.northEast.latitude] forKey:@"lat"];
-  [northeast setObject:[NSNumber numberWithDouble:bounds.northEast.longitude] forKey:@"lng"];
+  [northeast setObject:[NSNumber numberWithFloat:bounds.northEast.latitude] forKey:@"lat"];
+  [northeast setObject:[NSNumber numberWithFloat:bounds.northEast.longitude] forKey:@"lng"];
   [json setObject:northeast forKey:@"northeast"];
-  [southwest setObject:[NSNumber numberWithDouble:bounds.southWest.latitude] forKey:@"lat"];
-  [southwest setObject:[NSNumber numberWithDouble:bounds.southWest.longitude] forKey:@"lng"];
+  [southwest setObject:[NSNumber numberWithFloat:bounds.southWest.latitude] forKey:@"lat"];
+  [southwest setObject:[NSNumber numberWithFloat:bounds.southWest.longitude] forKey:@"lng"];
   [json setObject:southwest forKey:@"southwest"];
 
 
 
   NSMutableDictionary *farLeft = [NSMutableDictionary dictionary];
-  [farLeft setObject:[NSNumber numberWithDouble:visibleRegion.farLeft.latitude] forKey:@"lat"];
-  [farLeft setObject:[NSNumber numberWithDouble:visibleRegion.farLeft.longitude] forKey:@"lng"];
+  [farLeft setObject:[NSNumber numberWithFloat:visibleRegion.farLeft.latitude] forKey:@"lat"];
+  [farLeft setObject:[NSNumber numberWithFloat:visibleRegion.farLeft.longitude] forKey:@"lng"];
   [json setObject:farLeft forKey:@"farLeft"];
 
   NSMutableDictionary *farRight = [NSMutableDictionary dictionary];
-  [farRight setObject:[NSNumber numberWithDouble:visibleRegion.farRight.latitude] forKey:@"lat"];
-  [farRight setObject:[NSNumber numberWithDouble:visibleRegion.farRight.longitude] forKey:@"lng"];
+  [farRight setObject:[NSNumber numberWithFloat:visibleRegion.farRight.latitude] forKey:@"lat"];
+  [farRight setObject:[NSNumber numberWithFloat:visibleRegion.farRight.longitude] forKey:@"lng"];
   [json setObject:farRight forKey:@"farRight"];
 
   NSMutableDictionary *nearLeft = [NSMutableDictionary dictionary];
-  [nearLeft setObject:[NSNumber numberWithDouble:visibleRegion.nearLeft.latitude] forKey:@"lat"];
-  [nearLeft setObject:[NSNumber numberWithDouble:visibleRegion.nearLeft.longitude] forKey:@"lng"];
+  [nearLeft setObject:[NSNumber numberWithFloat:visibleRegion.nearLeft.latitude] forKey:@"lat"];
+  [nearLeft setObject:[NSNumber numberWithFloat:visibleRegion.nearLeft.longitude] forKey:@"lng"];
   [json setObject:nearLeft forKey:@"nearLeft"];
 
   NSMutableDictionary *nearRight = [NSMutableDictionary dictionary];
-  [nearRight setObject:[NSNumber numberWithDouble:visibleRegion.nearRight.latitude] forKey:@"lat"];
-  [nearRight setObject:[NSNumber numberWithDouble:visibleRegion.nearRight.longitude] forKey:@"lng"];
+  [nearRight setObject:[NSNumber numberWithFloat:visibleRegion.nearRight.latitude] forKey:@"lat"];
+  [nearRight setObject:[NSNumber numberWithFloat:visibleRegion.nearRight.longitude] forKey:@"lng"];
   [json setObject:nearRight forKey:@"nearRight"];
 
   NSData* jsonData = [NSJSONSerialization dataWithJSONObject:json options:0 error:nil];
   NSString* sourceArrayString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: '%@', callback: '_onCameraEvent', args: [%@]});}",
-                        self.overlayId, self.overlayId, eventName, sourceArrayString];
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: '%@', callback: '_onCameraEvent', args: [%@]});",
+                        self.mapId, eventName, sourceArrayString];
   [self execJS:jsString];
 
   [self syncInfoWndPosition];
 }
 
+- (void)execJS: (NSString *)jsString {
+  if ([self.webView respondsToSelector:@selector(stringByEvaluatingJavaScriptFromString:)]) {
+    [self.webView performSelector:@selector(stringByEvaluatingJavaScriptFromString:) withObject:jsString];
+  } else if ([self.webView respondsToSelector:@selector(evaluateJavaScript:completionHandler:)]) {
+    [self.webView performSelector:@selector(evaluateJavaScript:completionHandler:) withObject:jsString withObject:nil];
+  }
+}
 
 /**
  * cluster_*** events
@@ -595,8 +600,8 @@
 
   // Get the marker plugin
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: '%@', callback: '_onClusterEvent', args: ['%@', '%@', new plugin.google.maps.LatLng(%f, %f)]});}",
-                        self.overlayId, self.overlayId, eventName, clusterId, markerId,
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: '%@', callback: '_onClusterEvent', args: ['%@', '%@', new plugin.google.maps.LatLng(%f, %f)]});",
+                        self.mapId, eventName, clusterId, markerId,
                         marker.position.latitude,
                         marker.position.longitude];
   [self execJS:jsString];
@@ -613,8 +618,8 @@
   NSString *markerId = [tmp objectAtIndex:([tmp count] - 1)];
 
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: '%@', callback: '_onMarkerEvent', args: ['%@', new plugin.google.maps.LatLng(%f, %f)]});}",
-                        self.overlayId, self.overlayId, eventName, markerId,
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: '%@', callback: '_onMarkerEvent', args: ['%@', new plugin.google.maps.LatLng(%f, %f)]});",
+                        self.mapId, eventName, markerId,
                         marker.position.latitude,
                         marker.position.longitude];
   [self execJS:jsString];
@@ -626,8 +631,8 @@
 - (void)triggerOverlayEvent: (NSString *)eventName overlayId:(NSString*)overlayId coordinate:(CLLocationCoordinate2D)coordinate
 {
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: '%@', callback: '_onOverlayEvent', args: ['%@', new plugin.google.maps.LatLng(%f, %f)]});}",
-                        self.overlayId, self.overlayId, eventName, overlayId, coordinate.latitude, coordinate.longitude];
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: '%@', callback: '_onOverlayEvent', args: ['%@', new plugin.google.maps.LatLng(%f, %f)]});",
+                        self.mapId, eventName, overlayId, coordinate.latitude, coordinate.longitude];
   [self execJS:jsString];
 }
 
@@ -647,11 +652,11 @@
 
 
   // Get the marker plugin
-  //NSString *pluginId = [NSString stringWithFormat:@"%@-marker", self.overlayId];
-  //CDVPlugin<IPluginProtocol> *plugin = [self.plugins objectForKey:pluginId];
+  //NSString *pluginId = [NSString stringWithFormat:@"%@-marker", self.mapId];
+  //CDVPlugin<MyPlgunProtocol> *plugin = [self.plugins objectForKey:pluginId];
 
   // Get the marker properties
-  NSString *markerPropertyId = [NSString stringWithFormat:@"marker_property_%@", marker.userData];
+  NSString *markerPropertyId = [NSString stringWithFormat:@"marker_property_%lu", (unsigned long)marker.userData];
   NSDictionary *properties = [self.objects objectForKey:markerPropertyId];
   Boolean useHtmlInfoWnd = marker.title == nil && marker.snippet == nil;
 
@@ -783,22 +788,14 @@
     }
 
     // Calculate the size for the title strings
-    CGRect textRect = [title boundingRectWithSize:CGSizeMake(mapView.frame.size.width - 13, mapView.frame.size.height - 13)
-                                 options:NSStringDrawingUsesLineFragmentOrigin
-                              attributes:@{NSFontAttributeName:titleFont}
-                                 context:nil];
-    textSize = textRect.size;
+    textSize = [title sizeWithFont:titleFont constrainedToSize: CGSizeMake(mapView.frame.size.width - 13, mapView.frame.size.height - 13)];
     rectSize = CGSizeMake(textSize.width + 10, textSize.height + 22);
 
     // Calculate the size for the snippet strings
     if (snippet) {
       snippetFont = [UIFont systemFontOfSize:12.0f];
       snippet = [snippet stringByReplacingOccurrencesOfString:@"\n" withString:@""];
-      textRect = [snippet boundingRectWithSize:CGSizeMake(mapView.frame.size.width - 13, mapView.frame.size.height - 13)
-                                 options:NSStringDrawingUsesLineFragmentOrigin
-                              attributes:@{NSFontAttributeName:snippetFont}
-                                 context:nil];
-      snippetSize = textRect.size;
+      snippetSize = [snippet sizeWithFont:snippetFont constrainedToSize: CGSizeMake(mapView.frame.size.width - 13, mapView.frame.size.height - 13)];
       rectSize.height += snippetSize.height + 4;
       if (rectSize.width < snippetSize.width + leftImg.size.width) {
         rectSize.width = snippetSize.width + leftImg.size.width;
@@ -836,7 +833,6 @@
   CGImageRef shadowImageRef = CGImageCreateWithImageInRect(leftImg.CGImage, trimArea);
   UIImage *shadowImageLeft = [UIImage imageWithCGImage:shadowImageRef scale:scale orientation:UIImageOrientationUp];
   UIImage *shadowImageRight = [UIImage imageWithCGImage:shadowImageRef scale:scale orientation:UIImageOrientationUpMirrored];
-  CGImageRelease(shadowImageRef);
 
   int y;
   int i = 0;
@@ -866,7 +862,6 @@
       shadowImageRef = CGImageCreateWithImageInRect(leftImg.CGImage, trimArea);
       shadowImageLeft = [UIImage imageWithCGImage:shadowImageRef scale:scale orientation:UIImageOrientationUp];
       shadowImageRight = [UIImage imageWithCGImage:shadowImageRef scale:scale orientation:UIImageOrientationUpMirrored];
-      CGImageRelease(shadowImageRef);
 
     } else {
       x += shadowImageLeft.size.width;
@@ -886,7 +881,6 @@
   shadowImageRef = CGImageCreateWithImageInRect(leftImg.CGImage, trimArea);
   shadowImageLeft = [UIImage imageWithCGImage:shadowImageRef scale:scale orientation:UIImageOrientationUp];
   shadowImageRight = [UIImage imageWithCGImage:shadowImageRef scale:scale orientation:UIImageOrientationUpMirrored];
-  CGImageRelease(shadowImageRef);
   x += shadowImageLeft.size.width;
 
   y = 1;
@@ -1010,8 +1004,8 @@
   }
   //Notify to the JS
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: 'indoor_building_focused', callback: '_onMapEvent'});}",
-                        self.overlayId, self.overlayId];
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: 'indoor_building_focused', callback: '_onMapEvent'});",
+                        self.mapId];
   [self execJS:jsString];
 }
 
@@ -1049,8 +1043,8 @@
 
   //Notify to the JS
   NSString* jsString = [NSString
-                        stringWithFormat:@"javascript:if('%@' in plugin.google.maps){plugin.google.maps['%@']({evtName: 'indoor_level_activated', callback: '_onMapEvent', args: [%@]});}",
-                        self.overlayId, self.overlayId, JSONstring];
+                        stringWithFormat:@"javascript:cordova.fireDocumentEvent('%@', {evtName: 'indoor_level_activated', callback: '_onMapEvent', args: [%@]});",
+                        self.mapId, JSONstring];
 
   [self execJS:jsString];
 }

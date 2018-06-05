@@ -7,12 +7,11 @@
 //
 
 #import "CordovaGoogleMaps.h"
-#import "IPluginProtocol.h"
+#import "MyPlgunProtocol.h"
 #import "NSData+Base64.h"
-#import "IPluginView.h"
 
-@interface PluginMap : CDVPlugin<IPluginProtocol, IPluginView>
-@property (nonatomic, strong) PluginMapViewController* mapCtrl;
+@interface PluginMap : CDVPlugin<MyPlgunProtocol>
+@property (nonatomic, strong) GoogleMapsViewController* mapCtrl;
 @property (nonatomic) BOOL isRemoved;
 @property (nonatomic) BOOL initialized;
 
@@ -33,8 +32,7 @@
 - (void)setIndoorEnabled:(CDVInvokedUrlCommand*)command;
 - (void)setTrafficEnabled:(CDVInvokedUrlCommand*)command;
 - (void)setCompassEnabled:(CDVInvokedUrlCommand*)command;
-- (void)attachToWebView:(CDVInvokedUrlCommand*)command;
-- (void)detachFromWebView:(CDVInvokedUrlCommand*)command;
+//- (void)getCameraPosition:(CDVInvokedUrlCommand*)command;
 - (void)toDataURL:(CDVInvokedUrlCommand*)command;
 - (void)setOptions:(CDVInvokedUrlCommand*)command;
 - (void)setAllGesturesEnabled:(CDVInvokedUrlCommand*)command;
@@ -44,5 +42,3 @@
 - (void)setActiveMarkerId:(CDVInvokedUrlCommand*)command;
 
 @end
-
-
